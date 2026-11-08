@@ -35,14 +35,16 @@ type KnowledgeSource struct {
 }
 
 type LeadUserPromptData struct {
-	Goal      string
-	ContextMD string
-	Tasks     []LeadTaskRow
-	Results   []LeadResultRow
-	Roles     []string
-	Questions []domain.RunQuestion
-	SpecText  string
-	SpecName  string
+	Goal         string
+	ContextMD    string
+	Tasks        []LeadTaskRow
+	Results      []LeadResultRow
+	Roles        []string
+	Questions    []domain.RunQuestion
+	SpecText     string
+	SpecName     string
+	RevisionText string
+	Artifacts    []domain.Artifact
 }
 
 type LeadTaskRow struct {

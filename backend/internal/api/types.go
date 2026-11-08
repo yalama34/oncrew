@@ -31,6 +31,19 @@ type AnswerRequest struct {
 	Answer     string `json:"answer"`
 }
 
+type RevisionRequest struct {
+	Text string `json:"text"`
+}
+type RevisionDTO struct {
+	ID            string `json:"id"`
+	Text          string `json:"text"`
+	Status        string `json:"status"`
+	Summary       string `json:"summary"`
+	FailureReason string `json:"failure_reason"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
 type QuestionDTO struct {
 	ID         string  `json:"id"`
 	Question   string  `json:"question"`
@@ -86,4 +99,15 @@ type ArtifactDTO struct {
 	Filename string `json:"filename"`
 	Language string `json:"language"`
 	Content  string `json:"content"`
+}
+
+type ArtifactVersionDTO struct {
+	ID         string  `json:"id"`
+	TaskID     string  `json:"task_id"`
+	Filename   string  `json:"filename"`
+	Language   string  `json:"language"`
+	Content    string  `json:"content"`
+	Version    int     `json:"version"`
+	RevisionID *string `json:"revision_id"`
+	CreatedAt  string  `json:"created_at"`
 }

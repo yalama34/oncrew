@@ -49,7 +49,12 @@ func (s *Store) UpdateSpecStatus(ctx context.Context, id uuid.UUID, status, mess
 }
 
 func (s *Store) FailRun(ctx context.Context, id uuid.UUID, reason string) error {
-	return s.db.WithContext(ctx).Model(&domain.Run{}).Where("id = ?", id).Updates(map[string]interface{}{"status": domain.RunStatusFailed, "failure_reason": reason}).Error
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&domain.Run{}).Where("id = ?", id).Updates(map[string]interface{}{"status": domain.RunStatusFailed, "failure_reason": reason}).Error; err != nil {
+			return err
+		}
+		return tx.Model(&domain.RunRevision{}).Where("run_id = ? AND status IN ?", id, []domain.RunStatus{domain.RunStatusRunning, domain.RunStatusWaiting}).Updates(map[string]interface{}{"status": domain.RunStatusFailed, "failure_reason": reason}).Error
+	})
 }
 
 func (s *Store) IncrementLeadSteps(ctx context.Context, id uuid.UUID, limit int) (bool, error) {

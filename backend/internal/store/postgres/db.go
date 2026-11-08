@@ -21,9 +21,12 @@ func CreateTables(db *gorm.DB) error {
 		&domain.Run{},
 		&domain.RunContext{},
 		&domain.RunQuestion{},
+		&domain.RunRevision{},
 		&domain.Task{},
 		&domain.TaskDependency{},
+		&domain.TaskArtifactSource{},
 		&domain.Artifact{},
+		&domain.ArtifactVersion{},
 		&store.DocumentChunk{},
 		&store.MemoryChunk{},
 	); err != nil {

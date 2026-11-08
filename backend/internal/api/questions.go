@@ -77,6 +77,11 @@ func (h *RunHandler) AnswerQuestion(w http.ResponseWriter, r *http.Request) {
 		if err := h.Engine.Start(context.Background(), run.ID, run.Goal); err != nil {
 			log.Printf("[API] Run %s failed: %v", run.ID, err)
 		}
+		if revision, err := h.Store.ActiveRevision(context.Background(), run.ID); err == nil {
+			if current, getErr := h.Store.GetRun(context.Background(), run.ID); getErr == nil {
+				_ = h.Store.UpdateRevisionStatus(context.Background(), revision.ID, current.Status, "", current.FailureReason)
+			}
+		}
 	}()
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusAccepted)

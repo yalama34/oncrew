@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/yalama34/orchestrator/internal/domain"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func (s *Store) CreateTask(ctx context.Context, task *domain.Task) error {
@@ -54,6 +55,19 @@ func (s *Store) SetTaskFeedback(ctx context.Context, id uuid.UUID, feedback stri
 		return fmt.Errorf("[STORE] Failed to set task feedback: %w", err)
 	}
 	return nil
+}
+
+func (s *Store) ReworkTask(ctx context.Context, id uuid.UUID, feedback string) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var task domain.Task
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&task, "id = ?", id).Error; err != nil {
+			return err
+		}
+		if task.Status != domain.TaskStatusReview && task.Status != domain.TaskStatusBlocked && task.Status != domain.TaskStatusDone {
+			return fmt.Errorf("[STORE] Task cannot be reworked from %s", task.Status)
+		}
+		return tx.Model(&task).Updates(map[string]interface{}{"status": domain.TaskStatusTodo, "feedback": feedback, "failure_reason": "", "model_phase": "", "model_started_at": nil, "model_last_activity_at": nil, "memory_version": task.MemoryVersion + 1, "memory_status": "", "memory_error": ""}).Error
+	})
 }
 
 func (s *Store) SetTaskResult(ctx context.Context, id uuid.UUID, summary string, status domain.TaskStatus) error {

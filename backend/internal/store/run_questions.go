@@ -23,6 +23,9 @@ func (s *Store) CreateRunQuestion(ctx context.Context, runID uuid.UUID, question
 		if result.RowsAffected != 1 {
 			return ErrRunNotWaiting
 		}
+		if err := tx.Model(&domain.RunRevision{}).Where("run_id = ? AND status = ?", runID, domain.RunStatusRunning).Update("status", domain.RunStatusWaiting).Error; err != nil {
+			return err
+		}
 		return tx.Create(&domain.RunQuestion{ID: uuid.New(), RunID: runID, Question: question}).Error
 	})
 }
@@ -54,7 +57,10 @@ func (s *Store) AnswerRunQuestion(ctx context.Context, runID, questionID uuid.UU
 		if result.RowsAffected != 1 {
 			return ErrRunNotWaiting
 		}
-		return tx.Model(&run).Update("status", domain.RunStatusRunning).Error
+		if err := tx.Model(&run).Update("status", domain.RunStatusRunning).Error; err != nil {
+			return err
+		}
+		return tx.Model(&domain.RunRevision{}).Where("run_id = ? AND status = ?", runID, domain.RunStatusWaiting).Update("status", domain.RunStatusRunning).Error
 	})
 	return run, err
 }

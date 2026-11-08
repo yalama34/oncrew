@@ -41,3 +41,9 @@ type TaskDependency struct {
 	TaskID      uuid.UUID `gorm:"type:uuid;primaryKey"`
 	DependsOnID uuid.UUID `gorm:"type:uuid;primaryKey"`
 }
+
+type TaskArtifactSource struct {
+	TaskID     uuid.UUID `gorm:"type:uuid;primaryKey"`
+	ArtifactID uuid.UUID `gorm:"type:uuid;primaryKey"`
+	Version    int       `gorm:"not null"`
+}

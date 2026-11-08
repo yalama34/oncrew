@@ -37,9 +37,10 @@ type Action struct {
 }
 
 type TaskSpec struct {
-	Key       string   `json:"key"`
-	Title     string   `json:"title"`
-	AssignTo  string   `json:"assign_to"`
-	Details   string   `json:"details,omitempty"`
-	DependsOn []string `json:"depends_on"`
+	Key         string   `json:"key"`
+	Title       string   `json:"title"`
+	AssignTo    string   `json:"assign_to"`
+	Details     string   `json:"details,omitempty"`
+	DependsOn   []string `json:"depends_on"`
+	ArtifactIDs []string `json:"artifact_ids,omitempty"`
 }

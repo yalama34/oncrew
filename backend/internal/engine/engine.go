@@ -70,7 +70,7 @@ func (e *Engine) Step(ctx context.Context, runID uuid.UUID, goal string) error {
 		return err
 	}
 	review := func() (uuid.UUID, []agent.Action, error) {
-		allowed, err := e.Store.IncrementLeadSteps(ctx, runID, e.MaxSteps)
+		allowed, err := e.incrementLeadSteps(ctx, runID)
 		if err != nil {
 			return uuid.Nil, nil, err
 		}
@@ -80,6 +80,17 @@ func (e *Engine) Step(ctx context.Context, runID uuid.UUID, goal string) error {
 		return e.decide(ctx, runID, goal)
 	}
 	return e.executeReadyTasks(ctx, run, review)
+}
+
+func (e *Engine) incrementLeadSteps(ctx context.Context, runID uuid.UUID) (bool, error) {
+	revision, err := e.Store.ActiveRevision(ctx, runID)
+	if err == nil {
+		return e.Store.IncrementRevisionSteps(ctx, revision.ID, e.MaxSteps)
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return false, err
+	}
+	return e.Store.IncrementLeadSteps(ctx, runID, e.MaxSteps)
 }
 
 func (e *Engine) executeTask(ctx context.Context, run domain.Run, task domain.Task) error {
@@ -99,6 +110,11 @@ func (e *Engine) executeTask(ctx context.Context, run domain.Run, task domain.Ta
 	if err != nil {
 		return err
 	}
+	sourceArtifacts, err := e.Store.ListTaskSourceArtifacts(ctx, task.ID)
+	if err != nil {
+		return err
+	}
+	previousArtifacts = append(previousArtifacts, sourceArtifacts...)
 	questions, err := e.Store.ListRunQuestions(ctx, runID)
 	if err != nil {
 		return err
@@ -206,7 +222,7 @@ func (e *Engine) Start(ctx context.Context, runID uuid.UUID, goal string) (resul
 		return err
 	}
 	for i := 0; i < e.MaxSteps; i++ {
-		allowed, err := e.Store.IncrementLeadSteps(ctx, runID, e.MaxSteps)
+		allowed, err := e.incrementLeadSteps(ctx, runID)
 		if err != nil {
 			return err
 		}
@@ -319,6 +335,13 @@ func (e *Engine) buildLeadUserPrompt(ctx context.Context, runID uuid.UUID, goal 
 		Questions: questions,
 		SpecText:  run.SpecText,
 		SpecName:  run.SpecName,
+	}
+	if revision, err := e.Store.ActiveRevision(ctx, runID); err == nil {
+		data.RevisionText = revision.Text
+		data.Artifacts, err = e.Store.ListArtifactsByRun(ctx, runID)
+		if err != nil {
+			return "", err
+		}
 	}
 
 	prompt, err := agent.LeadUserPrompt(data)

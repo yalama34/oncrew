@@ -148,7 +148,7 @@ func TestAcceptedTaskMemoryReachesWorkerAndIsIsolated(t *testing.T) {
 		t.Fatalf("lead missing task memory: %s", leadPrompt)
 	}
 	dependency := domain.TaskDependency{TaskID: work.ID, DependsOnID: accepted.ID}
-	if err := st.CreateTaskGraph(ctx, nil, []domain.TaskDependency{dependency}); err != nil {
+	if err := st.CreateTaskGraph(ctx, nil, []domain.TaskDependency{dependency}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if sources := eng.searchTaskMemory(ctx, run.ID, work); len(sources) != 0 {

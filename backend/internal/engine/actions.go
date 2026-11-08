@@ -24,7 +24,11 @@ func (e *Engine) applyActions(ctx context.Context, runID, leadID uuid.UUID, acti
 		}
 		return domain.Agent{}, fmt.Errorf("[ENGINE] No worker with role %q in this run", role)
 	}
+	created := make(map[string]uuid.UUID)
 	findTask := func(id string) (domain.Task, error) {
+		if taskID, ok := created[id]; ok {
+			return e.Store.GetTask(ctx, taskID)
+		}
 		taskID, err := uuid.Parse(id)
 		if err != nil {
 			return domain.Task{}, err
@@ -41,13 +45,18 @@ func (e *Engine) applyActions(ctx context.Context, runID, leadID uuid.UUID, acti
 	for _, a := range actions {
 		switch a.Type {
 		case agent.ActionCreateTasks:
-			if err := e.createTaskGraph(ctx, runID, a.Tasks, findWorker); err != nil {
+			if err := e.createTaskGraphWithKeys(ctx, runID, a.Tasks, findWorker, created); err != nil {
 				return err
+			}
+			if len(a.Tasks) > 0 {
+				if err := e.Store.MarkRevisionWork(ctx, runID); err != nil {
+					return err
+				}
 			}
 		case agent.ActionAssignTask:
 			task, err := findTask(a.TaskID)
 			if err != nil {
-				return fmt.Errorf("[ENGINE] Failed to parse UUID: %w", err)
+				return fmt.Errorf("[ENGINE] Failed to assign task %q: %w", a.TaskID, err)
 			}
 			assignee := a.AssignTo
 			agent, err := findWorker(assignee)
@@ -84,13 +93,16 @@ func (e *Engine) applyActions(ctx context.Context, runID, leadID uuid.UUID, acti
 			if err != nil {
 				return fmt.Errorf("[ENGINE] Failed to rework task: %w", err)
 			}
-			if task.Status != domain.TaskStatusReview && task.Status != domain.TaskStatusBlocked {
+			if task.Status != domain.TaskStatusReview && task.Status != domain.TaskStatusBlocked && task.Status != domain.TaskStatusDone {
 				return fmt.Errorf("[ENGINE] Task %s cannot be reworked", task.ID)
 			}
-			if err = e.Store.SetTaskFeedback(ctx, task.ID, a.Feedback); err != nil {
+			if strings.TrimSpace(a.Feedback) == "" {
+				return fmt.Errorf("[ENGINE] Rework feedback is required")
+			}
+			if err = e.Store.ReworkTask(ctx, task.ID, a.Feedback); err != nil {
 				return err
 			}
-			if err = e.Store.UpdateTaskStatus(ctx, task.ID, domain.TaskStatusTodo); err != nil {
+			if err := e.Store.MarkRevisionWork(ctx, runID); err != nil {
 				return err
 			}
 		case agent.ActionMessageUser:
@@ -105,6 +117,9 @@ func (e *Engine) applyActions(ctx context.Context, runID, leadID uuid.UUID, acti
 			}
 			return errWaitingForUser
 		case agent.ActionCompleteRun:
+			if revision, err := e.Store.ActiveRevision(ctx, runID); err == nil && !revision.WorkStarted {
+				return fmt.Errorf("[ENGINE] Cannot finish revision before assigning work")
+			}
 			tasks, err := e.Store.ListTasksByRun(ctx, runID)
 			if err != nil {
 				return err
@@ -116,6 +131,11 @@ func (e *Engine) applyActions(ctx context.Context, runID, leadID uuid.UUID, acti
 			}
 			if err := e.Store.UpdateRunStatus(ctx, runID, domain.RunStatusFinished); err != nil {
 				return err
+			}
+			if revision, err := e.Store.ActiveRevision(ctx, runID); err == nil {
+				if err := e.Store.UpdateRevisionStatus(ctx, revision.ID, domain.RunStatusFinished, a.Summary, ""); err != nil {
+					return err
+				}
 			}
 			fmt.Println("PLACEHOLDER complete run", a.Summary)
 			return nil

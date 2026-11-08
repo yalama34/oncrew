@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/yalama34/orchestrator/internal/domain"
@@ -56,6 +57,30 @@ func (s *Store) ListArtifactsByTask(ctx context.Context, taskID uuid.UUID) ([]do
 		return nil, fmt.Errorf("[STORE] Failed to list task artifacts: %w", err)
 	}
 	return artifacts, nil
+}
+
+func (s *Store) ListTaskSourceArtifacts(ctx context.Context, taskID uuid.UUID) ([]domain.Artifact, error) {
+	var artifacts []domain.Artifact
+	err := s.db.WithContext(ctx).Joins("JOIN task_artifact_sources ON task_artifact_sources.artifact_id = artifacts.id").Where("task_artifact_sources.task_id = ?", taskID).Find(&artifacts).Error
+	return artifacts, err
+}
+
+func (s *Store) ListArtifactVersions(ctx context.Context, runID, artifactID uuid.UUID) ([]domain.ArtifactVersion, error) {
+	var artifact domain.Artifact
+	if err := s.db.WithContext(ctx).Where("id = ? AND run_id = ?", artifactID, runID).First(&artifact).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	var versions []domain.ArtifactVersion
+	if err := s.db.WithContext(ctx).Where("artifact_id = ?", artifactID).Order("version ASC").Find(&versions).Error; err != nil {
+		return nil, err
+	}
+	if len(versions) == 0 {
+		versions = append(versions, domain.ArtifactVersion{ID: artifact.ID, RunID: runID, ArtifactID: artifact.ID, TaskID: artifact.TaskID, Filename: artifact.Filename, Language: artifact.Language, Content: artifact.Content, Version: 1, CreatedAt: time.Now()})
+	}
+	return versions, nil
 }
 
 func (s *Store) SaveTaskArtifact(ctx context.Context, artifact *domain.Artifact) error {

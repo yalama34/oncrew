@@ -11,6 +11,10 @@ import (
 )
 
 func (e *Engine) createTaskGraph(ctx context.Context, runID uuid.UUID, specs []agent.TaskSpec, findWorker func(string) (domain.Agent, error)) error {
+	return e.createTaskGraphWithKeys(ctx, runID, specs, findWorker, nil)
+}
+
+func (e *Engine) createTaskGraphWithKeys(ctx context.Context, runID uuid.UUID, specs []agent.TaskSpec, findWorker func(string) (domain.Agent, error), created map[string]uuid.UUID) error {
 	ids := make(map[string]uuid.UUID, len(specs))
 	for i := range specs {
 		key := strings.TrimSpace(specs[i].Key)
@@ -24,6 +28,9 @@ func (e *Engine) createTaskGraph(ctx context.Context, runID uuid.UUID, specs []a
 		}
 		if _, ok := ids[key]; ok {
 			return fmt.Errorf("[ENGINE] Duplicate task key %q", key)
+		}
+		if _, ok := created[key]; ok {
+			return fmt.Errorf("[ENGINE] Duplicate task key %q in lead response", key)
 		}
 		if strings.TrimSpace(specs[i].Title) == "" {
 			return fmt.Errorf("[ENGINE] Task title is required")
@@ -69,19 +76,42 @@ func (e *Engine) createTaskGraph(ctx context.Context, runID uuid.UUID, specs []a
 	}
 	var tasks []domain.Task
 	var dependencies []domain.TaskDependency
+	var sources []domain.TaskArtifactSource
 	for _, spec := range specs {
 		worker, err := findWorker(spec.AssignTo)
 		if err != nil {
 			return fmt.Errorf("[ENGINE] Failed to assign task: %w", err)
 		}
 		workerID := worker.ID
-		tasks = append(tasks, domain.Task{ID: ids[spec.Key], RunID: runID, Status: domain.TaskStatusTodo, Text: spec.Title, Details: spec.Details, AssigneeID: &workerID})
+		details := spec.Details
+		for _, artifactIDText := range spec.ArtifactIDs {
+			artifactID, err := uuid.Parse(artifactIDText)
+			if err != nil {
+				return fmt.Errorf("[ENGINE] Invalid artifact id %q", artifactIDText)
+			}
+			artifact, err := e.Store.GetArtifactById(ctx, artifactID)
+			if err != nil || artifact.RunID != runID {
+				return fmt.Errorf("[ENGINE] Artifact %s does not belong to this run", artifactID)
+			}
+			details += fmt.Sprintf("\n\nИсходный артефакт для изменения (%s, id=%s):\n%s", artifact.Filename, artifact.ID, artifact.Content)
+			versions, err := e.Store.ListArtifactVersions(ctx, runID, artifact.ID)
+			if err != nil {
+				return err
+			}
+			sources = append(sources, domain.TaskArtifactSource{TaskID: ids[spec.Key], ArtifactID: artifact.ID, Version: versions[len(versions)-1].Version})
+		}
+		tasks = append(tasks, domain.Task{ID: ids[spec.Key], RunID: runID, Status: domain.TaskStatusTodo, Text: spec.Title, Details: details, AssigneeID: &workerID})
 		for _, dependency := range spec.DependsOn {
 			dependencies = append(dependencies, domain.TaskDependency{TaskID: ids[spec.Key], DependsOnID: ids[dependency]})
 		}
 	}
-	if err := e.Store.CreateTaskGraph(ctx, tasks, dependencies); err != nil {
+	if err := e.Store.CreateTaskGraph(ctx, tasks, dependencies, sources); err != nil {
 		return fmt.Errorf("[ENGINE] Failed to save task graph: %w", err)
+	}
+	if created != nil {
+		for key, id := range ids {
+			created[key] = id
+		}
 	}
 	return nil
 }
