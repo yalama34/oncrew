@@ -36,12 +36,39 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       MAX_LEAD_STEPS: ${MAX_LEAD_STEPS:-40}
+      ONCREW_ORIGIN: ${ONCREW_ORIGIN:-http://localhost:3000}
+      PREVIEW_CONTROL_ORIGIN: http://preview:8082
       PORT: "8080"
     ports:
       - "8080:8080"
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - default
+      - preview
+
+  preview:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: preview
+    restart: unless-stopped
+    environment:
+      ONCREW_ORIGIN: ${ONCREW_ORIGIN:-http://localhost:3000}
+      PREVIEW_PUBLIC_ORIGIN: ${PREVIEW_PUBLIC_ORIGIN:-http://127.0.0.1:8081}
+      PREVIEW_CONTROL_ADDR: ":8082"
+    ports:
+      - "127.0.0.1:8081:8081"
+    networks:
+      - preview
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 32
 
   frontend:
     build:
@@ -55,3 +82,6 @@ services:
 
 volumes:
   postgres_data:
+
+networks:
+  preview:
