@@ -61,7 +61,7 @@ func (f *flowTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		f.leadCalls++
 		switch f.leadCalls {
 		case 1:
-			output = `{"actions":[{"type":"create_tasks","tasks":[{"title":"Сделать API","details":"Использовать JSON","assign_to":"backend"}]}]}`
+			output = `{"actions":[{"type":"create_tasks","tasks":[{"title":"Сделать API","details":"Использовать JSON","assign_to":"backend","reads":[],"writes":["api.txt"]}]}]}`
 		case 2:
 			if !strings.Contains(prompt, "первый результат") || !strings.Contains(prompt, "version one") {
 				f.problem = "lead did not receive worker summary and artifact"
@@ -276,7 +276,7 @@ func TestBlockedResultWithPostgres(t *testing.T) {
 		} else {
 			leadCalls++
 			if leadCalls == 1 {
-				result = `{"actions":[{"type":"create_tasks","tasks":[{"title":"API","assign_to":"backend"}]}]}`
+				result = `{"actions":[{"type":"create_tasks","tasks":[{"title":"API","assign_to":"backend","reads":[],"writes":[]}]}]}`
 			} else {
 				leadSawReason = strings.Contains(input.Messages[1].Content, "нет схемы API") && strings.Contains(input.Messages[1].Content, "done=false")
 				result = `{"actions":[]}`
@@ -350,7 +350,7 @@ func TestAskUserAndResumeWithPostgres(t *testing.T) {
 			leadCalls++
 			switch leadCalls {
 			case 1:
-				result = `{"actions":[{"type":"create_tasks","tasks":[{"title":"Анализ","assign_to":"backend"}]},{"type":"ask_user","text":"Какие данные использовать?"},{"type":"complete_run","summary":"не должно выполниться"}]}`
+				result = `{"actions":[{"type":"create_tasks","tasks":[{"title":"Анализ","assign_to":"backend","reads":[],"writes":[]}]},{"type":"ask_user","text":"Какие данные использовать?"},{"type":"complete_run","summary":"не должно выполниться"}]}`
 			case 2:
 				if !strings.Contains(input.Messages[1].Content, "Ответ: тестовые данные") {
 					problem = "lead did not receive answer"
@@ -530,7 +530,7 @@ func TestWorkerStreamFailureIsPersisted(t *testing.T) {
 			return nil, err
 		}
 		if r.Model == "stream-lead" {
-			return flowStreamResponse(`{"actions":[{"type":"create_tasks","tasks":[{"title":"Test stream","details":"test","assign_to":"backend"}]}]}`), nil
+			return flowStreamResponse(`{"actions":[{"type":"create_tasks","tasks":[{"title":"Test stream","details":"test","assign_to":"backend","reads":[],"writes":[]}]}]}`), nil
 		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")), Header: make(http.Header)}, nil
 	})

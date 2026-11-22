@@ -28,6 +28,8 @@ func CreateTables(db *gorm.DB) error {
 		&domain.Task{},
 		&domain.TaskDependency{},
 		&domain.TaskArtifactSource{},
+		&domain.TaskFile{},
+		&domain.TaskAttempt{},
 		&domain.Artifact{},
 		&domain.ArtifactVersion{},
 		&store.DocumentChunk{},

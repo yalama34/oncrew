@@ -30,7 +30,9 @@ const leadSystemPrompt = `Ты — Team Lead команды разработки
 10. Каждой новой задаче дай уникальный key в рамках create_tasks и depends_on — массив key задач из того же списка. Независимые задачи оставляй с пустым массивом. Не допускай циклов.
 11. Указывай зависимости только там, где нужен принятый результат другой задачи. Заранее фиксируй контракты API для параллельной работы.
 12. Новые задачи уже назначаются через assign_to в create_tasks. Не вызывай для них assign_task. Для существующих задач используй полный id из списка задач.
-13. При доработке существующего файла верни его задачу на доработку или укажи полный id файла в artifact_ids новой задачи. Не создавай новый файл с тем же именем без привязки.
+13. При доработке существующего файла верни его задачу на доработку или перечисли его путь в reads и writes новой задачи.
+14. Для каждой новой задачи укажи reads и writes — массивы путей файлов для чтения и изменения. В reads перечисли существующие файлы, нужные для задачи. В writes перечисли все файлы, которые воркер может создать или изменить. Для задачи без файлов укажи пустые массивы. Планировщик последовательно выполняет задачи с пересекающимися writes.
+15. Если задача заблокирована из-за незаявленного или отсутствующего файла, верни её через rework_task и передай полный исправленный файловый план в reads и writes, а также feedback.
 
 ## Формат ответа
 
@@ -39,7 +41,7 @@ const leadSystemPrompt = `Ты — Team Lead команды разработки
     {
       "type": "create_tasks",
       "tasks": [
-        { "key": "ui", "title": "Краткое название", "assign_to": "frontend", "details": "Что именно сделать", "depends_on": [], "artifact_ids": [] }
+        { "key": "ui", "title": "Краткое название", "assign_to": "frontend", "details": "Что именно сделать", "depends_on": [], "reads": [], "writes": ["index.html"] }
       ]
     },
     {
@@ -243,7 +245,7 @@ const leadUserPromptTmpl = `Цель миссии: {{.Goal}}
 {{- if .Tasks}}
 
 Текущие задачи:
-{{range .Tasks}}- id={{.ID}} | status={{.Status}} | assignee={{.Assignee}} | text={{.Text}}{{if .Details}} | details={{.Details}}{{end}}{{if .DependsOn}} | depends_on={{range .DependsOn}}{{.}} {{end}}{{end}}{{if .Feedback}} | feedback={{.Feedback}}{{end}}
+{{range .Tasks}}- id={{.ID}} | status={{.Status}} | assignee={{.Assignee}} | text={{.Text}}{{if .Details}} | details={{.Details}}{{end}}{{if .DependsOn}} | depends_on={{range .DependsOn}}{{.}} {{end}}{{end}}{{if .Feedback}} | feedback={{.Feedback}}{{end}}{{if .FailureReason}} | error={{.FailureReason}}{{end}}
 {{end}}{{- end}}
 {{- if .Results}}
 

@@ -12,8 +12,57 @@ import (
 )
 
 var ErrArtifactConflict = errors.New("artifact filename conflict")
+var ErrUnplannedArtifact = errors.New("artifact was not declared for writing")
+var ErrMissingTaskFile = errors.New("required task file missing")
 
-func (s *Store) CreateTaskGraph(ctx context.Context, tasks []domain.Task, dependencies []domain.TaskDependency, sources []domain.TaskArtifactSource) error {
+func (s *Store) SaveTaskAttempt(ctx context.Context, taskID uuid.UUID, result string) error {
+	return s.db.WithContext(ctx).Create(&domain.TaskAttempt{ID: uuid.New(), TaskID: taskID, Result: result}).Error
+}
+
+func (s *Store) SnapshotTaskFiles(ctx context.Context, task domain.Task) ([]domain.Artifact, error) {
+	var artifacts []domain.Artifact
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", task.RunID.String()).Error; err != nil {
+			return err
+		}
+		var files []domain.TaskFile
+		if err := tx.Where("task_id = ?", task.ID).Find(&files).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("task_id = ?", task.ID).Delete(&domain.TaskArtifactSource{}).Error; err != nil {
+			return err
+		}
+		for _, file := range files {
+			var artifact domain.Artifact
+			err := tx.Where("run_id = ? AND filename = ?", task.RunID, file.Path).Order("COALESCE((SELECT MAX(created_at) FROM artifact_versions WHERE artifact_id = artifacts.id), 'epoch'::timestamptz) DESC").Order("id DESC").First(&artifact).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				if file.Read {
+					return fmt.Errorf("%w: %s", ErrMissingTaskFile, file.Path)
+				}
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			var latest domain.ArtifactVersion
+			if err := tx.Where("artifact_id = ?", artifact.ID).Order("version DESC").First(&latest).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			version := latest.Version
+			if version == 0 {
+				version = 1
+			}
+			if err := tx.Create(&domain.TaskArtifactSource{TaskID: task.ID, ArtifactID: artifact.ID, Version: version}).Error; err != nil {
+				return err
+			}
+			artifacts = append(artifacts, artifact)
+		}
+		return nil
+	})
+	return artifacts, err
+}
+
+func (s *Store) CreateTaskGraph(ctx context.Context, tasks []domain.Task, dependencies []domain.TaskDependency, sources []domain.TaskArtifactSource, files ...[]domain.TaskFile) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if len(tasks) > 0 {
 			if err := tx.Create(&tasks).Error; err != nil {
@@ -30,6 +79,11 @@ func (s *Store) CreateTaskGraph(ctx context.Context, tasks []domain.Task, depend
 				return err
 			}
 		}
+		if len(files) > 0 && len(files[0]) > 0 {
+			if err := tx.Create(&files[0]).Error; err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 }
@@ -41,6 +95,12 @@ func (s *Store) ListTaskDependencies(ctx context.Context, runID uuid.UUID) ([]do
 		return nil, fmt.Errorf("[STORE] Failed to list task dependencies: %w", err)
 	}
 	return dependencies, nil
+}
+
+func (s *Store) ListTaskFilesByRun(ctx context.Context, runID uuid.UUID) ([]domain.TaskFile, error) {
+	var files []domain.TaskFile
+	err := s.db.WithContext(ctx).Joins("JOIN tasks ON tasks.id = task_files.task_id").Where("tasks.run_id = ?", runID).Find(&files).Error
+	return files, err
 }
 
 func (s *Store) ClaimTask(ctx context.Context, id uuid.UUID) (bool, error) {
@@ -65,12 +125,60 @@ func (s *Store) SaveTaskOutput(ctx context.Context, task domain.Task, artifacts 
 		if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", task.RunID.String()).Error; err != nil {
 			return err
 		}
+		if task.FilePlan {
+			var snapshots []domain.TaskArtifactSource
+			if err := tx.Where("task_id = ?", task.ID).Find(&snapshots).Error; err != nil {
+				return err
+			}
+			for _, snapshot := range snapshots {
+				var source domain.Artifact
+				if err := tx.Where("id = ? AND run_id = ?", snapshot.ArtifactID, task.RunID).First(&source).Error; err != nil {
+					return err
+				}
+				var current domain.Artifact
+				if err := tx.Where("run_id = ? AND filename = ?", task.RunID, source.Filename).Order("COALESCE((SELECT MAX(created_at) FROM artifact_versions WHERE artifact_id = artifacts.id), 'epoch'::timestamptz) DESC").Order("id DESC").First(&current).Error; err != nil {
+					return err
+				}
+				if current.ID != source.ID {
+					return fmt.Errorf("%w: %s changed since task started", ErrArtifactConflict, source.Filename)
+				}
+				var latest domain.ArtifactVersion
+				if err := tx.Where("artifact_id = ?", snapshot.ArtifactID).Order("version DESC").First(&latest).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+					return err
+				}
+				version := latest.Version
+				if version == 0 {
+					version = 1
+				}
+				if version != snapshot.Version {
+					return fmt.Errorf("%w: source %s changed since task started", ErrArtifactConflict, snapshot.ArtifactID)
+				}
+			}
+		}
 		for i := range artifacts {
 			artifact := &artifacts[i]
+			if task.FilePlan {
+				var n int64
+				if err := tx.Model(&domain.TaskFile{}).Where("task_id = ? AND path = ? AND write = ?", task.ID, artifact.Filename, true).Count(&n).Error; err != nil {
+					return err
+				}
+				if n == 0 {
+					return fmt.Errorf("%w: %s", ErrUnplannedArtifact, artifact.Filename)
+				}
+			}
 			var existing domain.Artifact
 			var source domain.TaskArtifactSource
 			sourceErr := tx.Joins("JOIN artifacts ON artifacts.id = task_artifact_sources.artifact_id").Where("task_artifact_sources.task_id = ? AND artifacts.filename = ?", task.ID, artifact.Filename).First(&source).Error
 			if sourceErr == nil {
+				if task.FilePlan {
+					var current domain.Artifact
+					if err := tx.Where("run_id = ? AND filename = ?", task.RunID, artifact.Filename).Order("COALESCE((SELECT MAX(created_at) FROM artifact_versions WHERE artifact_id = artifacts.id), 'epoch'::timestamptz) DESC").Order("id DESC").First(&current).Error; err != nil {
+						return err
+					}
+					if current.ID != source.ArtifactID {
+						return fmt.Errorf("%w: %s changed since task started", ErrArtifactConflict, artifact.Filename)
+					}
+				}
 				var latest domain.ArtifactVersion
 				if err := tx.Where("artifact_id = ?", source.ArtifactID).Order("version DESC").First(&latest).Error; err != nil && err != gorm.ErrRecordNotFound {
 					return err
@@ -90,14 +198,25 @@ func (s *Store) SaveTaskOutput(ctx context.Context, task domain.Task, artifacts 
 				return sourceErr
 			} else {
 				err = tx.Where("task_id = ? AND filename = ?", task.ID, artifact.Filename).First(&existing).Error
+				if task.FilePlan {
+					var count int64
+					if qerr := tx.Model(&domain.Artifact{}).Where("run_id = ? AND filename = ?", task.RunID, artifact.Filename).Count(&count).Error; qerr != nil {
+						return qerr
+					}
+					if count > 0 {
+						return fmt.Errorf("%w: %s appeared since task started", ErrArtifactConflict, artifact.Filename)
+					}
+				}
 			}
 			var conflicts int64
 			conflictQuery := tx.Model(&domain.Artifact{}).Where("run_id = ? AND filename = ? AND task_id <> ?", task.RunID, artifact.Filename, task.ID).Where("task_id NOT IN (SELECT depends_on_id FROM task_dependencies WHERE task_id = ?)", task.ID)
 			if source.ArtifactID != uuid.Nil {
 				conflictQuery = conflictQuery.Where("id <> ?", source.ArtifactID)
 			}
-			if err := conflictQuery.Count(&conflicts).Error; err != nil {
-				return err
+			if !task.FilePlan {
+				if err := conflictQuery.Count(&conflicts).Error; err != nil {
+					return err
+				}
 			}
 			if conflicts > 0 {
 				return fmt.Errorf("%w: %s", ErrArtifactConflict, artifact.Filename)

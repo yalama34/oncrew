@@ -48,13 +48,14 @@ type LeadUserPromptData struct {
 }
 
 type LeadTaskRow struct {
-	ID        string
-	Status    string
-	Assignee  string
-	Text      string
-	Details   string
-	Feedback  string
-	DependsOn []string
+	ID            string
+	Status        string
+	Assignee      string
+	Text          string
+	Details       string
+	Feedback      string
+	FailureReason string
+	DependsOn     []string
 }
 
 type LeadResultRow struct {

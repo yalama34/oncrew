@@ -69,7 +69,7 @@ func TestSpecificationRAGFlow(t *testing.T) {
 			return nil, fmt.Errorf("lead did not receive full specification")
 		}
 		if leadCalls == 1 {
-			return flowStreamResponse(`{"actions":[{"type":"create_tasks","tasks":[{"title":"Платежи","details":"Сделать оплату","assign_to":"backend"}]}]}`), nil
+			return flowStreamResponse(`{"actions":[{"type":"create_tasks","tasks":[{"title":"Платежи","details":"Сделать оплату","assign_to":"backend","reads":[],"writes":["pay.txt"]}]}]}`), nil
 		}
 		if !strings.Contains(prompt, "Требования из spec.md > Платежи") || !strings.Contains(prompt, "pay.txt") {
 			return nil, fmt.Errorf("review did not receive specification or artifact")
