@@ -16,6 +16,9 @@ func CreateTables(db *gorm.DB) error {
 	if err := db.Exec("DROP INDEX IF EXISTS idx_artifacts_content").Error; err != nil {
 		return fmt.Errorf("[DB] Failed to drop artifact content index: %w", err)
 	}
+	if err := db.Exec("DROP INDEX IF EXISTS idx_run_contexts_content").Error; err != nil {
+		return fmt.Errorf("[DB] Failed to drop context content index: %w", err)
+	}
 	if err := db.AutoMigrate(
 		&domain.Agent{},
 		&domain.Run{},
