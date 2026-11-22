@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/yalama34/orchestrator/internal/agent"
 	"github.com/yalama34/orchestrator/internal/domain"
+	"github.com/yalama34/orchestrator/internal/store"
 )
 
 const maxWorkers = 3
@@ -41,6 +42,14 @@ func (e *Engine) executeReadyTasks(ctx context.Context, run domain.Run, reviews 
 					result = errors.Join(result, err)
 					stopping = true
 				} else {
+					files, err := e.Store.ListTaskFilesByRun(ctx, run.ID)
+					if err != nil {
+						return err
+					}
+					filePlans := make(map[uuid.UUID][]domain.TaskFile)
+					for _, file := range files {
+						filePlans[file.TaskID] = append(filePlans[file.TaskID], file)
+					}
 					statuses := make(map[uuid.UUID]domain.TaskStatus, len(tasks))
 					waiting := make(map[uuid.UUID][]uuid.UUID)
 					for _, task := range tasks {
@@ -62,6 +71,23 @@ func (e *Engine) executeReadyTasks(ctx context.Context, run domain.Run, reviews 
 							break
 						}
 						if busy[*task.AssigneeID] {
+							continue
+						}
+						fileBusy := false
+						for _, other := range tasks {
+							_, isRunning := running[other.ID]
+							if other.ID == task.ID || (!isRunning && other.Status != domain.TaskStatusInProgress && other.Status != domain.TaskStatusReview) {
+								continue
+							}
+							for _, want := range filePlans[task.ID] {
+								for _, current := range filePlans[other.ID] {
+									if want.Path == current.Path && (want.Write || current.Write) {
+										fileBusy = true
+									}
+								}
+							}
+						}
+						if fileBusy {
 							continue
 						}
 						ready := true
@@ -133,6 +159,9 @@ func (e *Engine) executeReadyTasks(ctx context.Context, run domain.Run, reviews 
 		delete(busy, running[event.ID])
 		delete(running, event.ID)
 		if event.Err != nil {
+			if errors.Is(event.Err, store.ErrUnplannedArtifact) || errors.Is(event.Err, store.ErrMissingTaskFile) {
+				continue
+			}
 			result = errors.Join(result, fmt.Errorf("task %s: %w", event.ID, event.Err))
 			stopping = true
 			continue

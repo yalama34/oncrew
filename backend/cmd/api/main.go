@@ -14,6 +14,7 @@ import (
 	"github.com/yalama34/orchestrator/internal/api"
 	"github.com/yalama34/orchestrator/internal/domain"
 	"github.com/yalama34/orchestrator/internal/engine"
+	"github.com/yalama34/orchestrator/internal/preview"
 	"github.com/yalama34/orchestrator/internal/rag"
 	"github.com/yalama34/orchestrator/internal/store"
 	"github.com/yalama34/orchestrator/internal/store/postgres"
@@ -94,6 +95,12 @@ func main() {
 	runHandler := &api.RunHandler{Store: &st, Engine: eng}
 	taskHandler := &api.TaskHandler{Store: &st}
 	artifactHandler := &api.ArtifactHandler{Store: &st}
+	if controlOrigin := os.Getenv("PREVIEW_CONTROL_ORIGIN"); controlOrigin != "" {
+		artifactHandler.Preview, err = preview.NewClient(controlOrigin)
+		if err != nil {
+			log.Fatalf("[MAIN] Invalid PREVIEW_CONTROL_ORIGIN: %v", err)
+		}
+	}
 
 	router := api.NewRouter(agentHandler, runHandler, taskHandler, artifactHandler)
 

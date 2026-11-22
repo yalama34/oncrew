@@ -31,10 +31,25 @@ type Task struct {
 	MemoryStatus        string     `gorm:"type:text"`
 	MemoryError         string     `gorm:"type:text"`
 	MemoryVersion       int64      `gorm:"not null;default:0"`
+	FilePlan            bool       `gorm:"not null;default:false"`
 	AssigneeID          *uuid.UUID `gorm:"type:uuid;index"`
 	Assignee            *Agent     `gorm:"foreignKey:AssigneeID"`
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+}
+
+type TaskFile struct {
+	TaskID uuid.UUID `gorm:"type:uuid;primaryKey"`
+	Path   string    `gorm:"type:text;primaryKey"`
+	Read   bool      `gorm:"not null"`
+	Write  bool      `gorm:"not null"`
+}
+
+type TaskAttempt struct {
+	ID        uuid.UUID `gorm:"type:uuid;primaryKey"`
+	TaskID    uuid.UUID `gorm:"type:uuid;not null;index"`
+	Result    string    `gorm:"type:text;not null"`
+	CreatedAt time.Time
 }
 
 type TaskDependency struct {

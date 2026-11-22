@@ -99,7 +99,19 @@ func (e *Engine) applyActions(ctx context.Context, runID, leadID uuid.UUID, acti
 			if strings.TrimSpace(a.Feedback) == "" {
 				return fmt.Errorf("[ENGINE] Rework feedback is required")
 			}
-			if err = e.Store.ReworkTask(ctx, task.ID, a.Feedback); err != nil {
+			if a.Reads != nil || a.Writes != nil {
+				if a.Reads == nil || a.Writes == nil {
+					return fmt.Errorf("[ENGINE] Both reads and writes are required")
+				}
+				files, fileErr := taskFiles(task.ID, a.Reads, a.Writes)
+				if fileErr != nil {
+					return fileErr
+				}
+				err = e.Store.ReworkTask(ctx, task.ID, a.Feedback, files)
+			} else {
+				err = e.Store.ReworkTask(ctx, task.ID, a.Feedback)
+			}
+			if err != nil {
 				return err
 			}
 			if err := e.Store.MarkRevisionWork(ctx, runID); err != nil {

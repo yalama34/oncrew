@@ -8,7 +8,7 @@ import (
 
 type RunContext struct {
 	RunID     uuid.UUID `gorm:"type:uuid;not null;primaryKey"`
-	Content   string    `gorm:"type:text;not null;index"`
+	Content   string    `gorm:"type:text;not null"`
 	UpdatedAt time.Time
 	UpdatedBy *uuid.UUID `gorm:"type:uuid"`
 }

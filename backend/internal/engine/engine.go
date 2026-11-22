@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -47,11 +48,31 @@ func (e *Engine) decide(ctx context.Context, runID uuid.UUID, goal string) (uuid
 	if lead.Agent.Role.SystemPrompt != "" {
 		system = lead.Agent.Role.SystemPrompt
 	}
-	out, err := agent.Decide(ctx, lead, system, userPrompt)
-	if err != nil {
-		return uuid.Nil, nil, fmt.Errorf("[ENGINE] Failed to decide: %w", err)
+	for attempt := 0; attempt < 3; attempt++ {
+		out, err := agent.Decide(ctx, lead, system, userPrompt)
+		if err != nil {
+			return uuid.Nil, nil, fmt.Errorf("[ENGINE] Failed to decide: %w", err)
+		}
+		if err := e.validateLeadFilePlans(ctx, runID, out.Actions); err != nil {
+			if !errors.Is(err, errInvalidFilePlan) {
+				return uuid.Nil, nil, err
+			}
+			if attempt == 2 {
+				return uuid.Nil, nil, fmt.Errorf("[ENGINE] Invalid file plan after retries: %w", err)
+			}
+			allowed, stepErr := e.incrementLeadSteps(ctx, runID)
+			if stepErr != nil {
+				return uuid.Nil, nil, stepErr
+			}
+			if !allowed {
+				return uuid.Nil, nil, fmt.Errorf("[ENGINE] Run reached maximum of %d lead decisions", e.MaxSteps)
+			}
+			userPrompt += "\n\nОшибка плана: " + err.Error() + "\nИсправь план целиком и повтори ответ; действий ещё не применяли."
+			continue
+		}
+		return leadAgent.ID, out.Actions, nil
 	}
-	return leadAgent.ID, out.Actions, nil
+	return uuid.Nil, nil, fmt.Errorf("[ENGINE] Invalid file plan")
 }
 
 func (e *Engine) Step(ctx context.Context, runID uuid.UUID, goal string) error {
@@ -110,11 +131,23 @@ func (e *Engine) executeTask(ctx context.Context, run domain.Run, task domain.Ta
 	if err != nil {
 		return err
 	}
-	sourceArtifacts, err := e.Store.ListTaskSourceArtifacts(ctx, task.ID)
+	var sourceArtifacts []domain.Artifact
+	if task.FilePlan {
+		sourceArtifacts, err = e.Store.SnapshotTaskFiles(ctx, task)
+	} else {
+		sourceArtifacts, err = e.Store.ListTaskSourceArtifacts(ctx, task.ID)
+	}
 	if err != nil {
+		if errors.Is(err, store.ErrMissingTaskFile) {
+			return e.failTask(task.ID, "Не найден заявленный файл: "+err.Error(), err)
+		}
 		return err
 	}
-	previousArtifacts = append(previousArtifacts, sourceArtifacts...)
+	if task.FilePlan {
+		previousArtifacts = sourceArtifacts
+	} else {
+		previousArtifacts = append(previousArtifacts, sourceArtifacts...)
+	}
 	questions, err := e.Store.ListRunQuestions(ctx, runID)
 	if err != nil {
 		return err
@@ -157,6 +190,13 @@ func (e *Engine) executeTask(ctx context.Context, run domain.Run, task domain.Ta
 		}
 		return e.failTask(task.ID, reason, err)
 	}
+	attempt, err := json.Marshal(result)
+	if err != nil {
+		return e.failTask(task.ID, "Не удалось сохранить ответ задачи.", err)
+	}
+	if err = e.Store.SaveTaskAttempt(ctx, task.ID, string(attempt)); err != nil {
+		return e.failTask(task.ID, "Не удалось сохранить ответ задачи.", err)
+	}
 	var artifacts []domain.Artifact
 	for _, art := range result.Artifacts {
 		artifacts = append(artifacts, domain.Artifact{ID: uuid.New(), RunID: runID, TaskID: task.ID, Filename: art.Filename, Language: art.Language, Content: art.Content})
@@ -167,6 +207,9 @@ func (e *Engine) executeTask(ctx context.Context, run domain.Run, task domain.Ta
 		status = domain.TaskStatusReview
 	}
 	if err := e.Store.SaveTaskOutput(ctx, task, artifacts, result.Summary, status); err != nil {
+		if errors.Is(err, store.ErrUnplannedArtifact) {
+			return e.failTask(task.ID, "Агент изменил незаявленный файл; ответ сохранён для разбора: "+err.Error(), err)
+		}
 		if errors.Is(err, store.ErrArtifactConflict) {
 			return e.failTask(task.ID, "Обнаружен конфликт имён файлов с другой независимой задачей.", err)
 		}
@@ -298,13 +341,14 @@ func (e *Engine) buildLeadUserPrompt(ctx context.Context, runID uuid.UUID, goal 
 			}
 		}
 		taskRows = append(taskRows, agent.LeadTaskRow{
-			ID:        t.ID.String(),
-			Status:    string(t.Status),
-			Assignee:  assignee,
-			Text:      t.Text,
-			Details:   t.Details,
-			Feedback:  t.Feedback,
-			DependsOn: dependsOn,
+			ID:            t.ID.String(),
+			Status:        string(t.Status),
+			Assignee:      assignee,
+			Text:          t.Text,
+			Details:       t.Details,
+			Feedback:      t.Feedback,
+			FailureReason: t.FailureReason,
+			DependsOn:     dependsOn,
 		})
 		if t.Status == domain.TaskStatusReview || t.Status == domain.TaskStatusBlocked {
 			artifacts, err := e.Store.ListArtifactsByTask(ctx, t.ID)

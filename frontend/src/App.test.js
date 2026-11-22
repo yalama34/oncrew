@@ -14,6 +14,31 @@ test('shows real runs and filters them by status', async () => {
   expect(screen.getByText('Ничего не найдено')).toBeInTheDocument();
 });
 
+test('runs a finished static result in a sandbox and stops its session', async () => {
+  const run = { id: 'static-run', goal: 'Статическая игра', status: 'finished', agent_ids: [], tasks_total: 1, tasks_done: 1, tasks_review: 0 };
+  const session = { id: 'session', url: 'http://127.0.0.1:8081/p/session/index.html', expires_at: new Date(Date.now() + 60_000).toISOString() };
+  global.fetch = jest.fn((url, options) => {
+    if (url.endsWith('/runs')) return response([run]);
+    if (url.endsWith('/artifacts')) return response([{ id: 'file', run_id: run.id, filename: 'index.html' }]);
+    if (url.endsWith('/previews') && options?.method === 'POST') return response(session);
+    if (url.endsWith('/previews/session') && options?.method === 'DELETE') return Promise.resolve({ ok: true, status: 204 });
+    return response([]);
+  });
+
+  render(<App />);
+  fireEvent.click(await screen.findByRole('button', { name: /Статическая игра/ }));
+  const start = await screen.findByRole('button', { name: 'Запустить результат' });
+  expect(screen.queryByTitle('Результат запуска')).toBeNull();
+  fireEvent.click(start);
+  const frame = await screen.findByTitle('Результат запуска');
+  expect(frame).toHaveAttribute('src', session.url);
+  expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
+  expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
+  fireEvent.click(screen.getByRole('button', { name: 'Остановить' }));
+  expect(screen.queryByTitle('Результат запуска')).toBeNull();
+  expect(global.fetch).toHaveBeenCalledWith('/api/runs/static-run/previews/session', expect.objectContaining({ method: 'DELETE' }));
+});
+
 test('shows a connection error when API is unavailable', async () => {
   global.fetch = jest.fn(() => Promise.reject(new Error('offline')));
   render(<App />);

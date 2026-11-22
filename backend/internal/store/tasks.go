@@ -57,7 +57,7 @@ func (s *Store) SetTaskFeedback(ctx context.Context, id uuid.UUID, feedback stri
 	return nil
 }
 
-func (s *Store) ReworkTask(ctx context.Context, id uuid.UUID, feedback string) error {
+func (s *Store) ReworkTask(ctx context.Context, id uuid.UUID, feedback string, plans ...[]domain.TaskFile) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var task domain.Task
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&task, "id = ?", id).Error; err != nil {
@@ -65,6 +65,19 @@ func (s *Store) ReworkTask(ctx context.Context, id uuid.UUID, feedback string) e
 		}
 		if task.Status != domain.TaskStatusReview && task.Status != domain.TaskStatusBlocked && task.Status != domain.TaskStatusDone {
 			return fmt.Errorf("[STORE] Task cannot be reworked from %s", task.Status)
+		}
+		if len(plans) > 0 {
+			if err := tx.Where("task_id = ?", id).Delete(&domain.TaskFile{}).Error; err != nil {
+				return err
+			}
+			if len(plans[0]) > 0 {
+				if err := tx.Create(&plans[0]).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Model(&task).Update("file_plan", true).Error; err != nil {
+				return err
+			}
 		}
 		return tx.Model(&task).Updates(map[string]interface{}{"status": domain.TaskStatusTodo, "feedback": feedback, "failure_reason": "", "model_phase": "", "model_started_at": nil, "model_last_activity_at": nil, "memory_version": task.MemoryVersion + 1, "memory_status": "", "memory_error": ""}).Error
 	})

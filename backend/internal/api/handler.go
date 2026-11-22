@@ -2,6 +2,7 @@ package api
 
 import (
 	"github.com/yalama34/orchestrator/internal/engine"
+	"github.com/yalama34/orchestrator/internal/preview"
 	"github.com/yalama34/orchestrator/internal/store"
 )
 
@@ -10,7 +11,8 @@ type AgentHandler struct {
 }
 
 type ArtifactHandler struct {
-	Store *store.Store
+	Store   *store.Store
+	Preview *preview.Client
 }
 
 type RunHandler struct {

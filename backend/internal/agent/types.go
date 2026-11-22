@@ -34,6 +34,8 @@ type Action struct {
 	ContextMD string     `json:"context_md,omitempty"`
 	Text      string     `json:"text,omitempty"`
 	Summary   string     `json:"summary,omitempty"`
+	Reads     []string   `json:"reads,omitempty"`
+	Writes    []string   `json:"writes,omitempty"`
 }
 
 type TaskSpec struct {
@@ -43,4 +45,6 @@ type TaskSpec struct {
 	Details     string   `json:"details,omitempty"`
 	DependsOn   []string `json:"depends_on"`
 	ArtifactIDs []string `json:"artifact_ids,omitempty"`
+	Reads       []string `json:"reads"`
+	Writes      []string `json:"writes"`
 }
